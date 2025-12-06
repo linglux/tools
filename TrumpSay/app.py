@@ -3,8 +3,46 @@ import requests
 from datetime import datetime
 import os
 import json
+import re
 
 app = Flask(__name__)
+
+def translate_to_chinese(text: str) -> str:
+    """使用 Google Translate API 将英文翻译成中文"""
+    if not text or text.strip() == "" or text == "<p>(无文本)</p>":
+        return text
+    
+    # 移除 HTML 标签，只翻译纯文本
+    clean_text = re.sub(r'<[^>]+>', '', text).strip()
+    if not clean_text:
+        return text
+    
+    try:
+        # 使用 Google Translate 免费 API
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "en",  # 源语言：英文
+            "tl": "zh-CN",  # 目标语言：简体中文
+            "dt": "t",
+            "q": clean_text
+        }
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        result = resp.json()
+        
+        # 解析翻译结果
+        translated_parts = []
+        if result and result[0]:
+            for part in result[0]:
+                if part[0]:
+                    translated_parts.append(part[0])
+        
+        translated_text = "".join(translated_parts)
+        return translated_text if translated_text else text
+    except Exception as e:
+        print(f"翻译失败: {e}")
+        return text  # 翻译失败时返回原文
 
 DEFAULT_API = (
     "https://truthsocial.com/api/v1/accounts/107780257626128497/statuses"
@@ -76,6 +114,21 @@ TEMPLATE = """
     .content p { margin: .4em 0; }
     .content a { color: var(--accent); text-decoration: none; }
     .content a:hover { text-decoration: underline; }
+    .content-original { margin-bottom: 12px; }
+    .content-translated { 
+      padding: 12px; 
+      background: rgba(56,189,248,.1); 
+      border-radius: 8px; 
+      border-left: 3px solid var(--accent);
+      color: #bae6fd;
+    }
+    .translate-label { 
+      font-size: 12px; 
+      color: var(--accent); 
+      font-weight: 600;
+      display: block;
+      margin-bottom: 6px;
+    }
     .media { padding: 0 14px 14px; display: grid; gap: 10px; }
     .thumb, video {
       width: 100%; border-radius: 10px; border: 1px solid #223046; background: #0b1220;
@@ -113,7 +166,13 @@ TEMPLATE = """
               <div class="meta" title="{{ s.created_at_raw }}">{{ s.created_at_fmt }}</div>
             </div>
             <div class="content">
-              {{ s.content_text | safe }}
+              <div class="content-original">{{ s.content_text | safe }}</div>
+              {% if s.content_text_cn and s.content_text_cn != s.content_text %}
+              <div class="content-translated">
+                <span class="translate-label">中文翻译：</span>
+                {{ s.content_text_cn }}
+              </div>
+              {% endif %}
             </div>
           </article>
         {% endfor %}
@@ -216,6 +275,7 @@ def home():
             "reblogs_count": s.get("reblogs_count", 0),
             "favourites_count": s.get("favourites_count", 0),
             "content_text": extract_content_html(s.get("content") or ""),
+            "content_text_cn": translate_to_chinese(extract_content_html(s.get("content") or "")),
             "account": {
                 "display_name": (account.get("display_name") or "").strip() or account.get("username"),
                 "username": account.get("username"),
